@@ -8,6 +8,7 @@ import (
 	"sync"
 
 	"github.com/keybase/kbfs/kbfscrypto"
+	"github.com/keybase/kbfs/tlf"
 
 	"golang.org/x/net/context"
 )
@@ -358,7 +359,7 @@ func (f *stallingBlockServer) maybeStall(ctx context.Context, opName StallableBl
 		f.stallKey, f.staller)
 }
 
-func (f *stallingBlockServer) Get(ctx context.Context, tlfID TlfID, id BlockID,
+func (f *stallingBlockServer) Get(ctx context.Context, tlfID tlf.TlfID, id BlockID,
 	bctx BlockContext) (
 	buf []byte, serverHalf kbfscrypto.BlockCryptKeyServerHalf, err error) {
 	f.maybeStall(ctx, StallableBlockGet)
@@ -370,7 +371,7 @@ func (f *stallingBlockServer) Get(ctx context.Context, tlfID TlfID, id BlockID,
 	return buf, serverHalf, err
 }
 
-func (f *stallingBlockServer) Put(ctx context.Context, tlfID TlfID, id BlockID,
+func (f *stallingBlockServer) Put(ctx context.Context, tlfID tlf.TlfID, id BlockID,
 	bctx BlockContext, buf []byte,
 	serverHalf kbfscrypto.BlockCryptKeyServerHalf) error {
 	f.maybeStall(ctx, StallableBlockPut)
@@ -402,7 +403,7 @@ func (m *stallingMDOps) maybeStall(ctx context.Context, opName StallableMDOp) {
 
 func (m *stallingMDOps) GetForHandle(
 	ctx context.Context, handle *TlfHandle, mStatus MergeStatus) (
-	tlfID TlfID, md ImmutableRootMetadata, err error) {
+	tlfID tlf.TlfID, md ImmutableRootMetadata, err error) {
 	m.maybeStall(ctx, StallableMDGetForHandle)
 	err = runWithContextCheck(ctx, func(ctx context.Context) error {
 		var errGetForHandle error
@@ -413,7 +414,7 @@ func (m *stallingMDOps) GetForHandle(
 	return tlfID, md, err
 }
 
-func (m *stallingMDOps) GetForTLF(ctx context.Context, id TlfID) (
+func (m *stallingMDOps) GetForTLF(ctx context.Context, id tlf.TlfID) (
 	md ImmutableRootMetadata, err error) {
 	m.maybeStall(ctx, StallableMDGetForTLF)
 	err = runWithContextCheck(ctx, func(ctx context.Context) error {
@@ -424,7 +425,7 @@ func (m *stallingMDOps) GetForTLF(ctx context.Context, id TlfID) (
 	return md, err
 }
 
-func (m *stallingMDOps) GetLatestHandleForTLF(ctx context.Context, id TlfID) (
+func (m *stallingMDOps) GetLatestHandleForTLF(ctx context.Context, id tlf.TlfID) (
 	h BareTlfHandle, err error) {
 	m.maybeStall(ctx, StallableMDGetLatestHandleForTLF)
 	err = runWithContextCheck(ctx, func(ctx context.Context) error {
@@ -435,7 +436,7 @@ func (m *stallingMDOps) GetLatestHandleForTLF(ctx context.Context, id TlfID) (
 	return h, err
 }
 
-func (m *stallingMDOps) GetUnmergedForTLF(ctx context.Context, id TlfID,
+func (m *stallingMDOps) GetUnmergedForTLF(ctx context.Context, id tlf.TlfID,
 	bid BranchID) (md ImmutableRootMetadata, err error) {
 	m.maybeStall(ctx, StallableMDGetUnmergedForTLF)
 	err = runWithContextCheck(ctx, func(ctx context.Context) error {
@@ -446,7 +447,7 @@ func (m *stallingMDOps) GetUnmergedForTLF(ctx context.Context, id TlfID,
 	return md, err
 }
 
-func (m *stallingMDOps) GetRange(ctx context.Context, id TlfID,
+func (m *stallingMDOps) GetRange(ctx context.Context, id tlf.TlfID,
 	start, stop MetadataRevision) (
 	mds []ImmutableRootMetadata, err error) {
 	m.maybeStall(ctx, StallableMDGetRange)
@@ -458,7 +459,7 @@ func (m *stallingMDOps) GetRange(ctx context.Context, id TlfID,
 	return mds, err
 }
 
-func (m *stallingMDOps) GetUnmergedRange(ctx context.Context, id TlfID,
+func (m *stallingMDOps) GetUnmergedRange(ctx context.Context, id tlf.TlfID,
 	bid BranchID, start, stop MetadataRevision) (mds []ImmutableRootMetadata, err error) {
 	m.maybeStall(ctx, StallableMDGetUnmergedRange)
 	err = runWithContextCheck(ctx, func(ctx context.Context) error {
@@ -492,7 +493,7 @@ func (m *stallingMDOps) PutUnmerged(ctx context.Context, md *RootMetadata) (
 }
 
 func (m *stallingMDOps) PruneBranch(
-	ctx context.Context, id TlfID, bid BranchID) error {
+	ctx context.Context, id tlf.TlfID, bid BranchID) error {
 	m.maybeStall(ctx, StallableMDPruneBranch)
 	return runWithContextCheck(ctx, func(ctx context.Context) error {
 		return m.delegate.PruneBranch(ctx, id, bid)
