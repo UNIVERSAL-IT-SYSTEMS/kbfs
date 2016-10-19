@@ -844,7 +844,8 @@ func (irmd ImmutableRootMetadata) GetWriterMetadataSigInfo() kbfscrypto.Signatur
 // TODO: Use the BareRootMetadataSigned types on the server side.
 type RootMetadataSigned struct {
 	// signature over the root metadata by the private signing key
-	SigInfo kbfscrypto.SignatureInfo `codec:",omitempty"`
+	SigInfo       kbfscrypto.SignatureInfo `codec:",omitempty"`
+	WriterSigInfo kbfscrypto.SignatureInfo
 	// all the metadata
 	MD BareRootMetadata
 	// When does the server say this MD update was received?  (This is
@@ -852,14 +853,25 @@ type RootMetadataSigned struct {
 	untrustedServerTimestamp time.Time
 }
 
-func MakeRootMetadataSigned(sigInfo kbfscrypto.SignatureInfo,
+// MakeRootMetadataSigned makes a RootMetadataSigned object from the
+// given info. If md stores the writer signature info internally, it
+// must match the given one.
+func MakeRootMetadataSigned(sigInfo, writerSigInfo kbfscrypto.SignatureInfo,
 	md BareRootMetadata,
-	untrustedServerTimestamp time.Time) *RootMetadataSigned {
+	untrustedServerTimestamp time.Time) (*RootMetadataSigned, error) {
+	if mdv2, ok := md.(*BareRootMetadataV2); ok {
+		if !mdv2.WriterMetadataSigInfo.Equals(writerSigInfo) {
+			return nil, fmt.Errorf(
+				"Expected writer sig info %v, got %v",
+				mdv2.WriterMetadataSigInfo, writerSigInfo)
+		}
+	}
 	return &RootMetadataSigned{
 		MD:                       md,
 		SigInfo:                  sigInfo,
+		WriterSigInfo:            writerSigInfo,
 		untrustedServerTimestamp: untrustedServerTimestamp,
-	}
+	}, nil
 }
 
 func signMD(
@@ -877,8 +889,14 @@ func signMD(
 	if err != nil {
 		return nil, err
 	}
+	var writerSigInfo kbfscrypto.SignatureInfo
+	if mdv2, ok := brmd.(*BareRootMetadataV2); ok {
+		writerSigInfo = mdv2.WriterMetadataSigInfo
+	} else {
+		panic("not implemented")
+	}
 	return MakeRootMetadataSigned(
-		sigInfo, brmd, untrustedServerTimestamp), nil
+		sigInfo, writerSigInfo, brmd, untrustedServerTimestamp)
 }
 
 // GetWriterMetadataSigInfo returns the signature of the writer
@@ -920,9 +938,9 @@ func (rmds *RootMetadataSigned) MakeFinalCopy(codec kbfscodec.Codec) (
 	// is to make verification easier for the client as otherwise it'd need to request
 	// the head revision - 1.
 	newBareMd.SetRevision(rmds.MD.RevisionNumber() + 1)
-	newRmds := MakeRootMetadataSigned(
-		rmds.SigInfo.DeepCopy(), newBareMd, time.Time{})
-	return newRmds, nil
+	return MakeRootMetadataSigned(
+		rmds.SigInfo.DeepCopy(), rmds.WriterSigInfo.DeepCopy(),
+		newBareMd, time.Time{})
 }
 
 // IsValidAndSigned verifies the RootMetadataSigned, checks the root
@@ -1044,13 +1062,14 @@ func DecodeRootMetadataSigned(
 			return nil, err
 		}
 		return MakeRootMetadataSigned(
-			brmds.SigInfo, &brmds.MD,
-			untrustedServerTimestamp), nil
+			brmds.SigInfo, brmds.MD.WriterMetadataSigInfo,
+			&brmds.MD, untrustedServerTimestamp)
 	}
 	var brmds BareRootMetadataSignedV3
 	if err := codec.Decode(buf, &brmds); err != nil {
 		return nil, err
 	}
 	return MakeRootMetadataSigned(
-		brmds.SigInfo, &brmds.MD, untrustedServerTimestamp), nil
+		brmds.SigInfo, brmds.WriterSigInfo,
+		&brmds.MD, untrustedServerTimestamp)
 }
