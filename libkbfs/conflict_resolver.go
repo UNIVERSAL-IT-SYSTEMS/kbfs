@@ -2665,11 +2665,14 @@ func (cr *ConflictResolver) syncTree(ctx context.Context, lState *lockState,
 
 // calculateResolutionBytes figured out how many bytes are referenced
 // and unreferenced in the merged branch by this resolution.  It
-// should be called before the block changes are unembedded in md.
+// should be called before the block changes are unembedded in md.  It
+// returns the list of blocks that can be remove from the flushing
+// queue, if any.
 func (cr *ConflictResolver) calculateResolutionUsage(ctx context.Context,
 	lState *lockState, md *RootMetadata, bps *blockPutState,
 	unmergedChains, mergedChains *crChains,
-	mostRecentMergedMD ImmutableRootMetadata) error {
+	mostRecentMergedMD ImmutableRootMetadata) (
+	blocksToDelete []BlockID, err error) {
 	md.SetRefBytes(0)
 	md.SetUnrefBytes(0)
 	md.SetDiskUsage(mostRecentMergedMD.DiskUsage())
@@ -2711,7 +2714,6 @@ func (cr *ConflictResolver) calculateResolutionUsage(ctx context.Context,
 	}
 
 	// Add bytes for every ref'd block.
-	var err error
 	for ptr := range refs {
 		block, ok := localBlocks[ptr]
 		if !ok {
@@ -2728,7 +2730,7 @@ func (cr *ConflictResolver) calculateResolutionUsage(ctx context.Context,
 			block, err = cr.fbo.blocks.GetBlockForReading(ctx, lState,
 				md.ReadOnly(), ptr, cr.fbo.branch())
 			if err != nil {
-				return err
+				return nil, err
 			}
 		}
 
@@ -2767,7 +2769,7 @@ func (cr *ConflictResolver) calculateResolutionUsage(ctx context.Context,
 			mostRecentMergedMD, ptr, cr.fbo.branch())
 		if err != nil {
 			cr.log.CDebugf(ctx, "Got err reading %v", ptr)
-			return err
+			return nil, err
 		}
 
 		cr.log.CDebugf(ctx, "Unref'ing block %v", ptr)
@@ -2776,9 +2778,9 @@ func (cr *ConflictResolver) calculateResolutionUsage(ctx context.Context,
 		md.SetDiskUsage(md.DiskUsage() - size)
 	}
 
-	// Any blocks that were created on the unmerged branch, but didn't
-	// survive the resolution, should be marked as unreferenced in the
-	// resolution.
+	// Any blocks that were created on the unmerged branch and have
+	// been flushed, but didn't survive the resolution, should be
+	// marked as unreferenced in the resolution.
 	toUnref := make(map[BlockPointer]bool)
 	for ptr := range unmergedChains.originals {
 		if !refs[ptr] && !unrefs[ptr] {
@@ -2795,6 +2797,17 @@ func (cr *ConflictResolver) calculateResolutionUsage(ctx context.Context,
 		}
 	}
 	for ptr := range toUnref {
+		isUnflushed, err := cr.config.BlockServer().IsUnflushed(
+			ctx, cr.fbo.id(), ptr.ID)
+		if err != nil {
+			return nil, err
+		}
+		if isUnflushed {
+			blocksToDelete = append(blocksToDelete, ptr.ID)
+			// No need to unreference this since we haven't flushed it yet.
+			continue
+		}
+
 		// Put the unrefs on the final operations, to cancel out any
 		// stray refs in earlier ops.
 		cr.log.CDebugf(ctx, "Unreferencing dropped block %v", ptr)
@@ -2804,7 +2817,7 @@ func (cr *ConflictResolver) calculateResolutionUsage(ctx context.Context,
 	cr.log.CDebugf(ctx, "New md byte usage: %d ref, %d unref, %d total usage "+
 		"(previously %d)", md.RefBytes, md.UnrefBytes, md.DiskUsage,
 		mostRecentMergedMD.DiskUsage)
-	return nil
+	return blocksToDelete, nil
 }
 
 // syncBlocks takes in the complete set of paths affected by this
@@ -2812,13 +2825,15 @@ func (cr *ConflictResolver) calculateResolutionUsage(ctx context.Context,
 // syncs using syncTree.  It returns a map describing how blocks were
 // updated in the merged branch, as well as the complete set of blocks
 // that need to be put to the server (and cached) to complete this
-// resolution.
+// resolution and a list of blocks that can be removed from the
+// flushing queue.
 func (cr *ConflictResolver) syncBlocks(ctx context.Context, lState *lockState,
 	md *RootMetadata, unmergedChains, mergedChains *crChains,
 	mostRecentMergedMD ImmutableRootMetadata,
 	resolvedPaths map[BlockPointer]path, lbc localBcache,
 	newFileBlocks fileBlockMap) (
-	updates map[BlockPointer]BlockPointer, bps *blockPutState, err error) {
+	updates map[BlockPointer]BlockPointer, bps *blockPutState,
+	blocksToDelete []BlockID, err error) {
 	// Construct a tree out of the merged paths, and do a sync at each leaf.
 	var root *crPathTreeNode
 	for _, p := range resolvedPaths {
@@ -2894,12 +2909,12 @@ func (cr *ConflictResolver) syncBlocks(ctx context.Context, lState *lockState,
 
 	updates = make(map[BlockPointer]BlockPointer)
 	if root == nil {
-		return updates, newBlockPutState(0), nil
+		return updates, newBlockPutState(0), nil, nil
 	}
 
 	_, uid, err := cr.config.KBPKI().GetCurrentUserInfo(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Now do a depth-first walk, and syncBlock back up to the fork on
@@ -2907,13 +2922,13 @@ func (cr *ConflictResolver) syncBlocks(ctx context.Context, lState *lockState,
 	bps, err = cr.syncTree(ctx, lState, unmergedChains, md, uid, root,
 		BlockPointer{}, lbc, newFileBlocks)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	oldOps := md.data.Changes.Ops
 	resOp, ok := oldOps[len(oldOps)-1].(*resolutionOp)
 	if !ok {
-		return nil, nil, fmt.Errorf("dummy op is not gc: %s",
+		return nil, nil, nil, fmt.Errorf("dummy op is not gc: %s",
 			oldOps[len(oldOps)-1])
 	}
 
@@ -2940,14 +2955,14 @@ func (cr *ConflictResolver) syncBlocks(ctx context.Context, lState *lockState,
 			mergedMostRecent, err :=
 				mergedChains.mostRecentFromOriginalOrSame(chain.original)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			cr.log.CDebugf(ctx, "Fixing resOp update from unmerged most "+
 				"recent %v to merged most recent %v",
 				update.Unref, mergedMostRecent)
 			err = update.setUnref(mergedMostRecent)
 			if err != nil {
-				return nil, nil, err
+				return nil, nil, nil, err
 			}
 			resOp.Updates[i] = update
 			updates[update.Unref] = update.Ref
@@ -3023,7 +3038,7 @@ func (cr *ConflictResolver) syncBlocks(ctx context.Context, lState *lockState,
 	newOps, err := crFixOpPointers(oldOps[:len(oldOps)-1], updates,
 		unmergedChains)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Clean up any gc updates that don't refer to blocks that exist
@@ -3086,10 +3101,10 @@ func (cr *ConflictResolver) syncBlocks(ctx context.Context, lState *lockState,
 		}
 	}
 
-	err = cr.calculateResolutionUsage(ctx, lState, md, bps, unmergedChains,
-		mergedChains, mostRecentMergedMD)
+	blocksToDelete, err = cr.calculateResolutionUsage(ctx, lState, md, bps,
+		unmergedChains, mergedChains, mostRecentMergedMD)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// do the block changes need their own blocks?
@@ -3097,10 +3112,10 @@ func (cr *ConflictResolver) syncBlocks(ctx context.Context, lState *lockState,
 	if !bsplit.ShouldEmbedBlockChanges(&md.data.Changes) {
 		err = cr.fbo.unembedBlockChanges(ctx, bps, md, &md.data.Changes, uid)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
-	return updates, bps, nil
+	return updates, bps, blocksToDelete, nil
 }
 
 // getOpsForLocalNotification returns the set of operations that this
@@ -3222,7 +3237,7 @@ func (cr *ConflictResolver) getOpsForLocalNotification(ctx context.Context,
 func (cr *ConflictResolver) finalizeResolution(ctx context.Context,
 	lState *lockState, md *RootMetadata, unmergedChains *crChains,
 	mergedChains *crChains, updates map[BlockPointer]BlockPointer,
-	bps *blockPutState, writerLocked bool) error {
+	bps *blockPutState, blocksToDelete []BlockID, writerLocked bool) error {
 	// Fix up all the block pointers in the merged ops to work well
 	// for local notifications.  Make a dummy op at the beginning to
 	// convert all the merged most recent pointers into unmerged most
@@ -3238,9 +3253,10 @@ func (cr *ConflictResolver) finalizeResolution(ctx context.Context,
 
 	if writerLocked {
 		return cr.fbo.finalizeResolutionLocked(
-			ctx, lState, md, bps, newOps, nil)
+			ctx, lState, md, bps, newOps, blocksToDelete)
 	}
-	return cr.fbo.finalizeResolution(ctx, lState, md, bps, newOps, nil)
+	return cr.fbo.finalizeResolution(
+		ctx, lState, md, bps, newOps, blocksToDelete)
 }
 
 // completeResolution pushes all the resolved blocks to the servers,
@@ -3264,7 +3280,7 @@ func (cr *ConflictResolver) completeResolution(ctx context.Context,
 		return err
 	}
 
-	updates, bps, err := cr.syncBlocks(
+	updates, bps, blocksToDelete, err := cr.syncBlocks(
 		ctx, lState, md, unmergedChains, mergedChains,
 		mostRecentMergedMD, resolvedPaths, lbc, newFileBlocks)
 	if err != nil {
@@ -3294,7 +3310,7 @@ func (cr *ConflictResolver) completeResolution(ctx context.Context,
 	}
 
 	err = cr.finalizeResolution(ctx, lState, md, unmergedChains,
-		mergedChains, updates, bps, writerLocked)
+		mergedChains, updates, bps, blocksToDelete, writerLocked)
 	if err != nil {
 		return err
 	}
