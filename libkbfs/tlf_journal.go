@@ -1411,7 +1411,7 @@ func (j *tlfJournal) doResolveBranch(ctx context.Context,
 	// the existing branch, then clear the existing branch.
 	mdID, err = j.mdJournal.resolveAndClear(
 		ctx, j.config.Crypto(), j.config.encryptionKeyGetter(),
-		j.config.BlockSplitter(), bid, rmd, extra)
+		j.config.BlockSplitter(), bid, rmd)
 	if err != nil {
 		return MdID{}, false, err
 	}

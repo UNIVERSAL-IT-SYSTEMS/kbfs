@@ -1186,8 +1186,8 @@ func (j *mdJournal) clear(
 
 func (j *mdJournal) resolveAndClear(
 	ctx context.Context, signer cryptoSigner, ekg encryptionKeyGetter,
-	bsplit BlockSplitter, bid BranchID, rmd *RootMetadata,
-	extra ExtraMetadata) (mdID MdID, err error) {
+	bsplit BlockSplitter, bid BranchID, rmd *RootMetadata) (
+	mdID MdID, err error) {
 	j.log.CDebugf(ctx, "Resolve and clear, branch %s, resolve rev %d",
 		bid, rmd.Revision())
 	defer func() {
@@ -1237,7 +1237,7 @@ func (j *mdJournal) resolveAndClear(
 	}()
 
 	otherJournal.branchID = NullBranchID
-	mdID, err = otherJournal.put(ctx, signer, ekg, bsplit, rmd, extra)
+	mdID, err = otherJournal.put(ctx, signer, ekg, bsplit, rmd)
 	if err != nil {
 		return MdID{}, err
 	}
