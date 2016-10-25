@@ -958,7 +958,7 @@ func flushBlockEntries(ctx context.Context, log logger.Logger,
 }
 
 func (j *blockJournal) removeFlushedEntry(ctx context.Context,
-	ordinal journalOrdinal, entry blockJournalEntry) (
+	ordinal journalOrdinal, entry blockJournalEntry, removeData bool) (
 	flushedBytes int64, err error) {
 	// Fix up the block byte count if we've finished a Put.
 	if entry.Op == blockPutOp && !entry.Ignore {
@@ -994,30 +994,32 @@ func (j *blockJournal) removeFlushedEntry(ctx context.Context,
 		return 0, err
 	}
 
-	// Remove any of the entry's refs that hasn't been modified by
-	// a subsequent block op (i.e., that has earliestOrdinal as a
-	// tag).
-	for id, idContexts := range entry.Contexts {
-		refs := j.refs[id]
-		if len(refs) == 0 {
-			continue
-		}
-		for _, context := range idContexts {
-			err := refs.remove(context, earliestOrdinal)
-			if err != nil {
-				return 0, err
-			}
+	if removeData {
+		// Remove any of the entry's refs that hasn't been modified by
+		// a subsequent block op (i.e., that has earliestOrdinal as a
+		// tag).
+		for id, idContexts := range entry.Contexts {
+			refs := j.refs[id]
 			if len(refs) == 0 {
-				delete(j.refs, id)
-
-				// Garbage-collect the old entry.  TODO: we'll
-				// eventually need a sweeper to clean up entries left
-				// behind if we crash here.
-				err = j.removeBlockData(id)
+				continue
+			}
+			for _, context := range idContexts {
+				err := refs.remove(context, earliestOrdinal)
 				if err != nil {
 					return 0, err
 				}
-				break
+				if len(refs) == 0 {
+					delete(j.refs, id)
+
+					// Garbage-collect the old entry.  TODO: we'll
+					// eventually need a sweeper to clean up entries left
+					// behind if we crash here.
+					err = j.removeBlockData(id)
+					if err != nil {
+						return 0, err
+					}
+					break
+				}
 			}
 		}
 	}
@@ -1026,11 +1028,12 @@ func (j *blockJournal) removeFlushedEntry(ctx context.Context,
 }
 
 func (j *blockJournal) removeFlushedEntries(ctx context.Context,
-	entries blockEntriesToFlush, tlfID TlfID, reporter Reporter) error {
+	entries blockEntriesToFlush, tlfID TlfID, reporter Reporter,
+	removeData bool) error {
 	// Remove them all!
 	for i, entry := range entries.all {
 		flushedBytes, err := j.removeFlushedEntry(
-			ctx, entries.first+journalOrdinal(i), entry)
+			ctx, entries.first+journalOrdinal(i), entry, removeData)
 		if err != nil {
 			return err
 		}

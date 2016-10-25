@@ -701,7 +701,7 @@ func (j *tlfJournal) removeFlushedBlockEntries(ctx context.Context,
 	}
 
 	return j.blockJournal.removeFlushedEntries(ctx, entries, j.tlfID,
-		j.config.Reporter())
+		j.config.Reporter(), true)
 }
 
 func (j *tlfJournal) flushBlockEntries(
