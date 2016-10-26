@@ -518,6 +518,14 @@ func (_mr *_MockKBFSOpsRecorder) PushConnectionStatusChange(arg0, arg1 interface
 	return _mr.mock.ctrl.RecordCall(_mr.mock, "PushConnectionStatusChange", arg0, arg1)
 }
 
+func (_m *MockKBFSOps) PushStatusChange() {
+	_m.ctrl.Call(_m, "PushStatusChange")
+}
+
+func (_mr *_MockKBFSOpsRecorder) PushStatusChange() *gomock.Call {
+	return _mr.mock.ctrl.RecordCall(_mr.mock, "PushStatusChange")
+}
+
 // Mock of KeybaseService interface
 type MockKeybaseService struct {
 	ctrl     *gomock.Controller
@@ -1174,6 +1182,38 @@ func (_m *MockencryptionKeyGetter) GetTLFCryptKeyForEncryption(ctx context.Conte
 
 func (_mr *_MockencryptionKeyGetterRecorder) GetTLFCryptKeyForEncryption(arg0, arg1 interface{}) *gomock.Call {
 	return _mr.mock.ctrl.RecordCall(_mr.mock, "GetTLFCryptKeyForEncryption", arg0, arg1)
+}
+
+// Mock of mdDecryptionKeyGetter interface
+type MockmdDecryptionKeyGetter struct {
+	ctrl     *gomock.Controller
+	recorder *_MockmdDecryptionKeyGetterRecorder
+}
+
+// Recorder for MockmdDecryptionKeyGetter (not exported)
+type _MockmdDecryptionKeyGetterRecorder struct {
+	mock *MockmdDecryptionKeyGetter
+}
+
+func NewMockmdDecryptionKeyGetter(ctrl *gomock.Controller) *MockmdDecryptionKeyGetter {
+	mock := &MockmdDecryptionKeyGetter{ctrl: ctrl}
+	mock.recorder = &_MockmdDecryptionKeyGetterRecorder{mock}
+	return mock
+}
+
+func (_m *MockmdDecryptionKeyGetter) EXPECT() *_MockmdDecryptionKeyGetterRecorder {
+	return _m.recorder
+}
+
+func (_m *MockmdDecryptionKeyGetter) GetTLFCryptKeyForMDDecryption(ctx context.Context, kmdToDecrypt KeyMetadata, kmdWithKeys KeyMetadata) (kbfscrypto.TLFCryptKey, error) {
+	ret := _m.ctrl.Call(_m, "GetTLFCryptKeyForMDDecryption", ctx, kmdToDecrypt, kmdWithKeys)
+	ret0, _ := ret[0].(kbfscrypto.TLFCryptKey)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+func (_mr *_MockmdDecryptionKeyGetterRecorder) GetTLFCryptKeyForMDDecryption(arg0, arg1, arg2 interface{}) *gomock.Call {
+	return _mr.mock.ctrl.RecordCall(_mr.mock, "GetTLFCryptKeyForMDDecryption", arg0, arg1, arg2)
 }
 
 // Mock of KeyManager interface
